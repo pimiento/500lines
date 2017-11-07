@@ -1,16 +1,19 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python3.5
 
 """Sloppy little crawler, demonstrates a hand-made event loop and coroutines.
 
 First read loop-with-callbacks.py. This example builds on that one, replacing
 callbacks with generators.
 """
-
-from selectors import *
-import socket
 import re
-import urllib.parse
 import time
+import socket
+import logging
+import urllib.parse
+from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("COROUTINES")
 
 
 class Future:
@@ -36,15 +39,20 @@ class Future:
 
 class Task:
     def __init__(self, coro):
+        logger.info("coro is %r", coro)
         self.coro = coro
         f = Future()
+        logger.info("new Future in Task is %r", f)
         f.set_result(None)
         self.step(f)
 
     def step(self, future):
+        logger.info("step %r", future)
         try:
             next_future = self.coro.send(future.result)
+            logger.info("next future is %r", next_future)
         except StopIteration:
+            logger.info("the end of Task %r", self)
             return
 
         next_future.add_done_callback(self.step)
@@ -59,6 +67,7 @@ stopped = False
 
 def connect(sock, address):
     f = Future()
+    logger.info("new Future in connect is %r", f)
     sock.setblocking(False)
     try:
         sock.connect(address)
@@ -75,12 +84,15 @@ def connect(sock, address):
 
 def read(sock):
     f = Future()
+    logger.info("new Future in read is %r", f)
 
     def on_readable():
         f.set_result(sock.recv(4096))  # Read 4k at a time.
 
     selector.register(sock.fileno(), EVENT_READ, on_readable)
+    logger.info("f is %r", f)
     chunk = yield from f
+    logger.info("chunk is %r", chunk)
     selector.unregister(sock.fileno())
     return chunk
 
@@ -89,9 +101,10 @@ def read_all(sock):
     response = []
     chunk = yield from read(sock)
     while chunk:
+        logger.info("yielded chunk is %r", chunk)
         response.append(chunk)
         chunk = yield from read(sock)
-
+    logger.info("response is %r", response)
     return b''.join(response)
 
 
@@ -154,9 +167,11 @@ fetcher = Fetcher('/')
 Task(fetcher.fetch())
 
 while not stopped:
+    logger.info("cycle step")
     events = selector.select()
     for event_key, event_mask in events:
         callback = event_key.data
+        logger.info("callback is %r", callback)
         callback()
 
 print('{} URLs fetched in {:.1f} seconds, achieved concurrency = {}'.format(
